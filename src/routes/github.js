@@ -45,12 +45,17 @@ router.post('/auth-url', authMiddleware, (req, res) => {
     return res.status(500).json({ error: 'GITHUB_CLIENT_ID not configured on server' })
   }
 
-  const redirectUri = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/github-callback`
+  // Use the request origin to build the redirect URI so it works from
+  // both localhost and production. The GitHub OAuth App must have this
+  // exact callback URL registered (or use GITHUB_REDIRECT_URI to override).
+  const origin = req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173'
+  const redirectUri = process.env.GITHUB_REDIRECT_URI || `${origin}/github-callback`
   const scope = 'repo read:user'
   const state = Math.random().toString(36).substring(2)
 
   const config = readJSON('github-config.json', {})
   config.oauthState = state
+  config.redirectUri = redirectUri // remember which URI was used
   writeJSON('github-config.json', config)
 
   const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}`
@@ -75,7 +80,7 @@ router.post('/callback', authMiddleware, async (req, res) => {
         client_id: process.env.GITHUB_CLIENT_ID,
         client_secret: process.env.GITHUB_CLIENT_SECRET,
         code,
-        redirect_uri: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/github-callback`,
+        redirect_uri: process.env.GITHUB_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/github-callback`,
       }),
     })
     const tokenData = await tokenRes.json()
