@@ -7,6 +7,7 @@ import adminRoutes from './routes/admin.js'
 import chatRoutes from './routes/chat.js'
 import videoRoutes from './routes/video.js'
 import ttsRoutes from './routes/tts.js'
+import githubRoutes from './routes/github.js'
 
 dotenv.config()
 
@@ -17,9 +18,20 @@ const app = express()
 const PORT = process.env.PORT || 3001
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173',
+  'http://localhost:4173',
+].filter(Boolean)
+
 app.use((req, res, next) => {
-  const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:5173'
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
+  const origin = req.headers.origin
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+  } else if (!origin) {
+    // Allow non-browser requests (Postman, curl, server-to-server)
+    res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS[0])
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   res.setHeader('Access-Control-Allow-Credentials', 'true')
@@ -39,6 +51,7 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/video', videoRoutes)
 app.use('/api/tts', ttsRoutes)
+app.use('/api/github', githubRoutes)
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
@@ -46,6 +59,7 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     tts: !!process.env.OPENAI_API_KEY,
+    github: !!process.env.GITHUB_CLIENT_ID,
   })
 })
 
