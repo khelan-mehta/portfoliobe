@@ -206,6 +206,31 @@ router.post('/scrape', authMiddleware, async (req, res) => {
         .filter((f) => f.type === 'blob' || f.type === 'tree')
         .map((f) => ({ path: f.path, type: f.type, size: f.size }))
         .slice(0, 500)
+
+      // Deep scrape: fetch contents of significant text files
+      const allowedExts = new Set(['js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'php', 'rb', 'swift', 'kt', 'md', 'json', 'yml', 'yaml', 'toml', 'xml', 'html', 'css', 'scss', 'sql', 'sh'])
+      
+      const filesToFetch = fileTree.filter(f => {
+        if (f.type !== 'blob') return false;
+        if (f.size > 100 * 1024) return false; // skip files > 100KB
+        if (f.path.includes('node_modules/') || f.path.includes('dist/') || f.path.includes('build/') || f.path.includes('package-lock.json') || f.path.includes('yarn.lock') || f.path.includes('pnpm-lock.yaml') || f.path.includes('.git/')) return false;
+        const parts = f.path.split('.');
+        if (parts.length < 2) return false;
+        const ext = parts.pop().toLowerCase();
+        return allowedExts.has(ext);
+      }).slice(0, 100); // Limit to 100 files to respect rate limits & avoid massive responses
+
+      const fetchContent = async (f) => {
+        try {
+          const content = await fetchGitHubRaw(`https://api.github.com/repos/${repoFullName}/contents/${f.path}`, token)
+          if (content) f.content = content
+        } catch {}
+      }
+
+      // Fetch in batches of 10 to avoid hammering the API
+      for (let i = 0; i < filesToFetch.length; i += 10) {
+        await Promise.all(filesToFetch.slice(i, i + 10).map(fetchContent));
+      }
     } catch {}
 
     let languages = {}
@@ -343,7 +368,7 @@ router.get('/scraped-all', (req, res) => {
 // ─── GET /api/github/rag-context/:repoName ──────────────────────────────────
 router.get('/rag-context/:repoName', (req, res) => {
   const { repoName } = req.params
-  const maxChunks = parseInt(req.query.maxChunks) || 15
+  const maxChunks = parseInt(req.query.maxChunks) || 50
   const scrapedDir = writablePath('scraped-repos')
   ensureDir(scrapedDir)
 
@@ -398,6 +423,37 @@ function buildRAGChunks(data) {
 
   if (data.fileTree?.length > 0) {
     chunks.push({ type: 'STRUCTURE', priority: 6, content: buildStructureChunk(data) })
+    
+    // Add file contents
+    data.fileTree.forEach(f => {
+      if (f.content) {
+        const contentLines = f.content.split('\n');
+        let currentChunk = '';
+        let chunkIndex = 1;
+        
+        for (let i = 0; i < contentLines.length; i++) {
+          currentChunk += contentLines[i] + '\n';
+          if (currentChunk.length > 2000) {
+            chunks.push({ 
+              type: 'FILE_CONTENT', 
+              priority: 7, 
+              section: `${f.path} (Part ${chunkIndex})`, 
+              content: `File: ${f.path}\n\n${currentChunk}` 
+            });
+            currentChunk = '';
+            chunkIndex++;
+          }
+        }
+        if (currentChunk.trim()) {
+          chunks.push({ 
+            type: 'FILE_CONTENT', 
+            priority: 7, 
+            section: chunkIndex > 1 ? `${f.path} (Part ${chunkIndex})` : f.path, 
+            content: `File: ${f.path}\n\n${currentChunk.trim()}` 
+          });
+        }
+      }
+    })
   }
 
   if (data.commits?.length > 0) {
