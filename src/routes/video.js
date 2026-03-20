@@ -1,18 +1,14 @@
 import express from 'express'
 import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+import { readablePath } from '../storage.js'
 
 const router = express.Router()
 
 // GET /api/video — return the current avatar video URL
 router.get('/', (req, res) => {
-  const uploadsDir = path.join(__dirname, '..', '..', 'uploads')
-
   try {
+    // Check the readable uploads dir for avatar video
+    const uploadsDir = readablePath('')
     if (!fs.existsSync(uploadsDir)) {
       return res.json({ videoUrl: null })
     }

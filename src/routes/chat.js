@@ -1,11 +1,6 @@
 import express from 'express'
 import OpenAI from 'openai'
-import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+import { readJSON } from '../storage.js'
 
 const router = express.Router()
 
@@ -62,14 +57,8 @@ RULES:
 
 // Load additional context from admin
 function getAdditionalContext() {
-  const contextPath = path.join(__dirname, '..', '..', 'uploads', 'ai-context.json')
-  try {
-    if (fs.existsSync(contextPath)) {
-      const data = JSON.parse(fs.readFileSync(contextPath, 'utf-8'))
-      return data.context || ''
-    }
-  } catch {}
-  return ''
+  const data = readJSON('ai-context.json', null)
+  return data?.context || ''
 }
 
 // POST /api/chat

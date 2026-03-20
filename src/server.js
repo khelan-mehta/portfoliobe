@@ -43,8 +43,11 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }))
 
 // ─── Static file serving ──────────────────────────────────────────────────────
-// Serve uploaded videos + voice samples
+// Serve uploaded files from both the bundled dir and /tmp (Vercel)
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')))
+if (process.env.VERCEL) {
+  app.use('/uploads', express.static('/tmp/uploads'))
+}
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/admin', adminRoutes)

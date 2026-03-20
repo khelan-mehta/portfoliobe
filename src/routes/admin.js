@@ -3,22 +3,12 @@ import jwt from 'jsonwebtoken'
 import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
-import { fileURLToPath } from 'url'
 import { authMiddleware } from '../middleware/auth.js'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+import { UPLOADS_DIR, ensureDir, readJSON, writeJSON, readablePath, writablePath } from '../storage.js'
 
 const router = express.Router()
 
-const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads')
 const VOICE_SAMPLE_DIR = path.join(UPLOADS_DIR, 'voice-samples')
-const VOICE_CONFIG_PATH = path.join(UPLOADS_DIR, 'voice-config.json')
-const CONTEXT_FILE_PATH = path.join(UPLOADS_DIR, 'ai-context.json')
-
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-}
 
 // ─── Multer: Video ────────────────────────────────────────────────────────────
 const videoStorage = multer.diskStorage({
@@ -115,11 +105,6 @@ router.post('/upload-video', authMiddleware, uploadVideo.single('video'), (req, 
 })
 
 // ─── POST /api/admin/upload-voice (protected) ────────────────────────────────
-// Accepts 1–5 audio samples for voice profile creation.
-// These samples are stored and used to identify the closest
-// matching OpenAI TTS voice. When true voice-clone APIs become
-// available (ElevenLabs or OpenAI custom voices), these samples
-// will be sent for cloning automatically.
 router.post('/upload-voice', authMiddleware, uploadVoice.array('voice', 5), (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No audio file(s) provided' })
@@ -141,29 +126,34 @@ router.post('/upload-voice', authMiddleware, uploadVoice.array('voice', 5), (req
 
 // ─── GET /api/admin/voice-samples (protected) ────────────────────────────────
 router.get('/voice-samples', authMiddleware, (req, res) => {
-  ensureDir(VOICE_SAMPLE_DIR)
-  try {
-    const files = fs.readdirSync(VOICE_SAMPLE_DIR).filter((f) => !f.startsWith('.'))
-    const samples = files.map((f) => {
-      const stat = fs.statSync(path.join(VOICE_SAMPLE_DIR, f))
-      return {
-        filename: f,
-        size: stat.size,
-        url: `/uploads/voice-samples/${f}`,
-        uploadedAt: stat.birthtime,
-      }
-    })
-    res.json({ samples })
-  } catch {
-    res.json({ samples: [] })
+  // Check both writable and read-only paths
+  const dirs = [VOICE_SAMPLE_DIR]
+  const readOnlyDir = readablePath('voice-samples')
+  if (readOnlyDir !== VOICE_SAMPLE_DIR) dirs.push(readOnlyDir)
+
+  const allSamples = []
+  for (const dir of dirs) {
+    try {
+      if (!fs.existsSync(dir)) continue
+      const files = fs.readdirSync(dir).filter((f) => !f.startsWith('.'))
+      files.forEach((f) => {
+        const stat = fs.statSync(path.join(dir, f))
+        allSamples.push({
+          filename: f,
+          size: stat.size,
+          url: `/uploads/voice-samples/${f}`,
+          uploadedAt: stat.birthtime,
+        })
+      })
+    } catch {}
   }
+  res.json({ samples: allSamples })
 })
 
 // ─── DELETE /api/admin/voice-samples/:filename (protected) ───────────────────
 router.delete('/voice-samples/:filename', authMiddleware, (req, res) => {
   const { filename } = req.params
 
-  // Sanitise: only allow simple filenames, no path traversal
   if (!filename || filename.includes('/') || filename.includes('..')) {
     return res.status(400).json({ error: 'Invalid filename' })
   }
@@ -183,14 +173,10 @@ router.delete('/voice-samples/:filename', authMiddleware, (req, res) => {
 
 // ─── GET /api/admin/voice-config (protected) ─────────────────────────────────
 router.get('/voice-config', authMiddleware, (req, res) => {
-  try {
-    if (fs.existsSync(VOICE_CONFIG_PATH)) {
-      const data = JSON.parse(fs.readFileSync(VOICE_CONFIG_PATH, 'utf-8'))
-      res.json(data)
-    } else {
-      res.json({ selectedVoice: 'onyx', speed: 1.0 })
-    }
-  } catch {
+  const data = readJSON('voice-config.json', null)
+  if (data) {
+    res.json(data)
+  } else {
     res.json({ selectedVoice: 'onyx', speed: 1.0 })
   }
 })
@@ -206,28 +192,22 @@ router.post('/voice-config', authMiddleware, (req, res) => {
 
   const validSpeed = typeof speed === 'number' && speed >= 0.25 && speed <= 4.0 ? speed : 1.0
 
-  ensureDir(UPLOADS_DIR)
-
   const config = {
     selectedVoice: selectedVoice || 'onyx',
     speed: validSpeed,
     updatedAt: new Date().toISOString(),
   }
 
-  fs.writeFileSync(VOICE_CONFIG_PATH, JSON.stringify(config, null, 2))
+  writeJSON('voice-config.json', config)
   res.json({ message: 'Voice config saved', config })
 })
 
 // ─── GET /api/admin/context (protected) ──────────────────────────────────────
 router.get('/context', authMiddleware, (req, res) => {
-  try {
-    if (fs.existsSync(CONTEXT_FILE_PATH)) {
-      const data = JSON.parse(fs.readFileSync(CONTEXT_FILE_PATH, 'utf-8'))
-      res.json({ context: data.context || '' })
-    } else {
-      res.json({ context: '' })
-    }
-  } catch {
+  const data = readJSON('ai-context.json', null)
+  if (data) {
+    res.json({ context: data.context || '' })
+  } else {
     res.json({ context: '' })
   }
 })
@@ -235,12 +215,7 @@ router.get('/context', authMiddleware, (req, res) => {
 // ─── POST /api/admin/context (protected) ─────────────────────────────────────
 router.post('/context', authMiddleware, (req, res) => {
   const { context } = req.body
-
-  ensureDir(path.dirname(CONTEXT_FILE_PATH))
-  fs.writeFileSync(
-    CONTEXT_FILE_PATH,
-    JSON.stringify({ context, updatedAt: new Date().toISOString() })
-  )
+  writeJSON('ai-context.json', { context, updatedAt: new Date().toISOString() })
   res.json({ message: 'Context saved successfully' })
 })
 

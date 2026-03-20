@@ -1,25 +1,14 @@
 import express from 'express'
 import OpenAI from 'openai'
 import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+import { readJSON, readablePath } from '../storage.js'
 
 const router = express.Router()
 
 const VALID_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']
-const VOICE_CONFIG_PATH = path.join(__dirname, '..', '..', 'uploads', 'voice-config.json')
-const VOICE_SAMPLE_DIR = path.join(__dirname, '..', '..', 'uploads', 'voice-samples')
 
 function getVoiceConfig() {
-  try {
-    if (fs.existsSync(VOICE_CONFIG_PATH)) {
-      return JSON.parse(fs.readFileSync(VOICE_CONFIG_PATH, 'utf-8'))
-    }
-  } catch {}
-  return { selectedVoice: 'onyx', speed: 1.0 }
+  return readJSON('voice-config.json', { selectedVoice: 'onyx', speed: 1.0 })
 }
 
 // POST /api/tts — Generate speech audio from text using OpenAI TTS
@@ -30,7 +19,6 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Text is required and must be a string' })
   }
 
-  // Enforce a generous but safe limit
   const sanitizedText = text.slice(0, 4096).trim()
   if (!sanitizedText) {
     return res.status(400).json({ error: 'Text cannot be empty' })
@@ -78,7 +66,9 @@ router.post('/', async (req, res) => {
 // GET /api/tts/config — Return current voice configuration and available voices
 router.get('/config', (req, res) => {
   const config = getVoiceConfig()
-  const hasSample = fs.existsSync(VOICE_SAMPLE_DIR) && fs.readdirSync(VOICE_SAMPLE_DIR).length > 0
+  const voiceSampleDir = readablePath('voice-samples')
+  let hasSample = false
+  try { hasSample = fs.existsSync(voiceSampleDir) && fs.readdirSync(voiceSampleDir).length > 0 } catch {}
 
   res.json({
     voices: VALID_VOICES.map((v) => ({
