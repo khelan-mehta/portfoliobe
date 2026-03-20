@@ -56,8 +56,8 @@ RULES:
 - Never break character or say you're an AI/chatbot — you ARE Khelan's avatar representing him`
 
 // Load additional context from admin
-function getAdditionalContext() {
-  const data = readJSON('ai-context.json', null)
+async function getAdditionalContext() {
+  const data = await readJSON('ai-context.json', null)
   return data?.context || ''
 }
 
@@ -80,7 +80,7 @@ router.post('/', async (req, res) => {
   try {
     const openai = new OpenAI({ apiKey })
 
-    const additionalContext = getAdditionalContext()
+    const additionalContext = await getAdditionalContext()
     const systemPrompt = additionalContext
       ? `${BASE_CONTEXT}\n\nADDITIONAL CONTEXT FROM KHELAN:\n${additionalContext}`
       : BASE_CONTEXT

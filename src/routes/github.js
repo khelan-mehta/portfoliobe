@@ -2,7 +2,7 @@ import express from 'express'
 import fs from 'fs'
 import path from 'path'
 import { authMiddleware } from '../middleware/auth.js'
-import { UPLOADS_DIR, ensureDir, readJSON, writeJSON, writablePath } from '../storage.js'
+import { UPLOADS_DIR, ensureDir, readJSON, writeJSON, writablePath, listJSON } from '../storage.js'
 
 const router = express.Router()
 
@@ -39,7 +39,7 @@ async function fetchGitHubRaw(url, token) {
 }
 
 // ─── POST /api/github/auth-url ──────────────────────────────────────────────
-router.post('/auth-url', authMiddleware, (req, res) => {
+router.post('/auth-url', authMiddleware, async (req, res) => {
   const clientId = process.env.GITHUB_CLIENT_ID
   if (!clientId) {
     return res.status(500).json({ error: 'GITHUB_CLIENT_ID not configured on server' })
@@ -53,10 +53,10 @@ router.post('/auth-url', authMiddleware, (req, res) => {
   const scope = 'repo read:user'
   const state = Math.random().toString(36).substring(2)
 
-  const config = readJSON('github-config.json', {})
+  const config = await readJSON('github-config.json', {})
   config.oauthState = state
   config.redirectUri = redirectUri // remember which URI was used
-  writeJSON('github-config.json', config)
+  await writeJSON('github-config.json', config)
 
   const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}`
   res.json({ url, state })
@@ -67,7 +67,7 @@ router.post('/callback', authMiddleware, async (req, res) => {
   const { code, state } = req.body
   if (!code) return res.status(400).json({ error: 'Missing code parameter' })
 
-  const config = readJSON('github-config.json', {})
+  const config = await readJSON('github-config.json', {})
   if (config.oauthState && config.oauthState !== state) {
     return res.status(400).json({ error: 'Invalid OAuth state — possible CSRF' })
   }
@@ -98,7 +98,7 @@ router.post('/callback', authMiddleware, async (req, res) => {
       avatarUrl: user.avatar_url,
       connectedAt: new Date().toISOString(),
     }
-    writeJSON('github-config.json', newConfig)
+    await writeJSON('github-config.json', newConfig)
 
     res.json({ connected: true, username: user.login, avatarUrl: user.avatar_url })
   } catch (err) {
@@ -107,8 +107,8 @@ router.post('/callback', authMiddleware, async (req, res) => {
 })
 
 // ─── GET /api/github/status ─────────────────────────────────────────────────
-router.get('/status', authMiddleware, (req, res) => {
-  const config = readJSON('github-config.json', {})
+router.get('/status', authMiddleware, async (req, res) => {
+  const config = await readJSON('github-config.json', {})
   if (config.accessToken) {
     res.json({
       connected: true,
@@ -123,14 +123,14 @@ router.get('/status', authMiddleware, (req, res) => {
 })
 
 // ─── POST /api/github/disconnect ────────────────────────────────────────────
-router.post('/disconnect', authMiddleware, (req, res) => {
-  writeJSON('github-config.json', {})
+router.post('/disconnect', authMiddleware, async (req, res) => {
+  await writeJSON('github-config.json', {})
   res.json({ disconnected: true })
 })
 
 // ─── GET /api/github/repos ──────────────────────────────────────────────────
 router.get('/repos', authMiddleware, async (req, res) => {
-  const config = readJSON('github-config.json', {})
+  const config = await readJSON('github-config.json', {})
   if (!config.accessToken) {
     return res.status(400).json({ error: 'GitHub not connected' })
   }
@@ -174,7 +174,7 @@ router.post('/scrape', authMiddleware, async (req, res) => {
   const { repoFullName } = req.body
   if (!repoFullName) return res.status(400).json({ error: 'Missing repoFullName' })
 
-  const config = readJSON('github-config.json', {})
+  const config = await readJSON('github-config.json', {})
   if (!config.accessToken) {
     return res.status(400).json({ error: 'GitHub not connected' })
   }
@@ -298,7 +298,7 @@ router.post('/scrape', authMiddleware, async (req, res) => {
     scrapedData.ragChunks = chunks
 
     const safeFilename = repoFullName.replace(/\//g, '__')
-    writeJSON(`scraped-repos/${safeFilename}.json`, scrapedData)
+    await writeJSON(`scraped-repos/${safeFilename}.json`, scrapedData)
 
     res.json({
       success: true,
@@ -320,15 +320,13 @@ router.post('/scrape', authMiddleware, async (req, res) => {
 })
 
 // ─── GET /api/github/scraped/:repoName ──────────────────────────────────────
-router.get('/scraped/:repoName', (req, res) => {
+router.get('/scraped/:repoName', async (req, res) => {
   const { repoName } = req.params
-  const scrapedDir = writablePath('scraped-repos')
-  ensureDir(scrapedDir)
 
   try {
-    const files = fs.readdirSync(scrapedDir).filter((f) => f.endsWith('.json'))
-    for (const file of files) {
-      const data = JSON.parse(fs.readFileSync(path.join(scrapedDir, file), 'utf-8'))
+    const keys = await listJSON('scraped-repos')
+    for (const key of keys) {
+      const data = await readJSON(key)
       if (data.repoName === repoName || data.repoFullName === repoName || data.repoFullName?.endsWith(`/${repoName}`)) {
         return res.json(data)
       }
@@ -340,15 +338,13 @@ router.get('/scraped/:repoName', (req, res) => {
 })
 
 // ─── GET /api/github/scraped-all ────────────────────────────────────────────
-router.get('/scraped-all', (req, res) => {
-  const scrapedDir = writablePath('scraped-repos')
-  ensureDir(scrapedDir)
-
+router.get('/scraped-all', async (req, res) => {
   try {
-    const files = fs.readdirSync(scrapedDir).filter((f) => f.endsWith('.json'))
-    const summaries = files.map((file) => {
-      const data = JSON.parse(fs.readFileSync(path.join(scrapedDir, file), 'utf-8'))
-      return {
+    const keys = await listJSON('scraped-repos')
+    const summaries = []
+    for (const key of keys) {
+      const data = await readJSON(key)
+      summaries.push({
         repoName: data.repoName,
         repoFullName: data.repoFullName,
         scrapedAt: data.scrapedAt,
@@ -357,8 +353,8 @@ router.get('/scraped-all', (req, res) => {
         languages: Object.keys(data.languages || {}),
         stars: data.metadata?.stars,
         description: data.metadata?.description,
-      }
-    })
+      })
+    }
     res.json({ repos: summaries, total: summaries.length })
   } catch {
     res.json({ repos: [], total: 0 })
@@ -366,16 +362,14 @@ router.get('/scraped-all', (req, res) => {
 })
 
 // ─── GET /api/github/rag-context/:repoName ──────────────────────────────────
-router.get('/rag-context/:repoName', (req, res) => {
+router.get('/rag-context/:repoName', async (req, res) => {
   const { repoName } = req.params
   const maxChunks = parseInt(req.query.maxChunks) || 50
-  const scrapedDir = writablePath('scraped-repos')
-  ensureDir(scrapedDir)
 
   try {
-    const files = fs.readdirSync(scrapedDir).filter((f) => f.endsWith('.json'))
-    for (const file of files) {
-      const data = JSON.parse(fs.readFileSync(path.join(scrapedDir, file), 'utf-8'))
+    const keys = await listJSON('scraped-repos')
+    for (const key of keys) {
+      const data = await readJSON(key)
       if (data.repoName === repoName || data.repoFullName === repoName || data.repoFullName?.endsWith(`/${repoName}`)) {
         const chunks = (data.ragChunks || [])
           .sort((a, b) => (b.priority || 0) - (a.priority || 0))
@@ -392,15 +386,15 @@ router.get('/rag-context/:repoName', (req, res) => {
 
 // ─── Graph Config ───────────────────────────────────────────────────────────
 
-router.get('/graph-config', authMiddleware, (req, res) => {
-  const data = readJSON('graph-config.json', { projects: {} })
+router.get('/graph-config', authMiddleware, async (req, res) => {
+  const data = await readJSON('graph-config.json', { projects: {} })
   res.json(data)
 })
 
-router.post('/graph-config', authMiddleware, (req, res) => {
+router.post('/graph-config', authMiddleware, async (req, res) => {
   const { projects } = req.body
   const config = { projects: projects || {}, updatedAt: new Date().toISOString() }
-  writeJSON('graph-config.json', config)
+  await writeJSON('graph-config.json', config)
   res.json({ message: 'Graph config saved', config })
 })
 

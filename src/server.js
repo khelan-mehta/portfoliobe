@@ -8,6 +8,7 @@ import chatRoutes from './routes/chat.js'
 import videoRoutes from './routes/video.js'
 import ttsRoutes from './routes/tts.js'
 import githubRoutes from './routes/github.js'
+import { connectDB } from './db.js'
 
 dotenv.config()
 
@@ -66,10 +67,13 @@ app.get('/api/health', (req, res) => {
   })
 })
 
-app.listen(PORT, () => {
-  console.log(`\n  ╔══════════════════════════════════════╗`)
-  console.log(`  ║  Portfolio Backend Running            ║`)
-  console.log(`  ║  http://localhost:${PORT}               ║`)
-  console.log(`  ║  TTS: ${process.env.OPENAI_API_KEY ? '✓ Configured' : '✗ Missing OPENAI_API_KEY'}           ║`)
-  console.log(`  ╚══════════════════════════════════════╝\n`)
+// Connect to Database and start server
+connectDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`\n  ╔══════════════════════════════════════╗`)
+    console.log(`  ║  Portfolio Backend Running            ║`)
+    console.log(`  ║  http://localhost:${PORT}               ║`)
+    console.log(`  ║  TTS: ${process.env.OPENAI_API_KEY ? '✓ Configured' : '✗ Missing OPENAI_API_KEY'}           ║`)
+    console.log(`  ╚══════════════════════════════════════╝\n`)
+  })
 })

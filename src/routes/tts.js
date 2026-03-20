@@ -7,8 +7,8 @@ const router = express.Router()
 
 const VALID_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']
 
-function getVoiceConfig() {
-  return readJSON('voice-config.json', { selectedVoice: 'onyx', speed: 1.0 })
+async function getVoiceConfig() {
+  return await readJSON('voice-config.json', { selectedVoice: 'onyx', speed: 1.0 })
 }
 
 // POST /api/tts — Generate speech audio from text using OpenAI TTS
@@ -31,7 +31,7 @@ router.post('/', async (req, res) => {
 
   try {
     const openai = new OpenAI({ apiKey })
-    const config = getVoiceConfig()
+    const config = await getVoiceConfig()
 
     const voice = VALID_VOICES.includes(config.selectedVoice) ? config.selectedVoice : 'onyx'
     const speed =
@@ -64,8 +64,8 @@ router.post('/', async (req, res) => {
 })
 
 // GET /api/tts/config — Return current voice configuration and available voices
-router.get('/config', (req, res) => {
-  const config = getVoiceConfig()
+router.get('/config', async (req, res) => {
+  const config = await getVoiceConfig()
   const voiceSampleDir = readablePath('voice-samples')
   let hasSample = false
   try { hasSample = fs.existsSync(voiceSampleDir) && fs.readdirSync(voiceSampleDir).length > 0 } catch {}

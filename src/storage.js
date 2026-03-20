@@ -1,14 +1,12 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { KeyStore } from './db.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// On Vercel (serverless), the filesystem is read-only except /tmp.
-// Locally, use the project's uploads/ directory.
 const IS_VERCEL = !!process.env.VERCEL
-
 const LOCAL_UPLOADS = path.join(__dirname, '..', 'uploads')
 const VERCEL_UPLOADS = '/tmp/uploads'
 
@@ -19,50 +17,87 @@ export function ensureDir(dir) {
 }
 
 /**
- * Read a JSON file. On Vercel, tries /tmp first, then falls back to
- * the bundled read-only copy (for pre-deployed files like ai-context.json).
+ * Read a JSON file or from MongoDB.
  */
-export function readJSON(relativePath, fallback = null) {
+export async function readJSON(relativePath, fallback = null) {
+  // Try MongoDB first
+  try {
+    const doc = await KeyStore.findOne({ key: relativePath })
+    if (doc) return doc.data
+  } catch (err) {
+    console.error(`MongoDB read error for ${relativePath}:`, err.message)
+  }
+
+  // Fallback to local filesystem (for pre-deployed files or dev)
   const tmpPath = path.join(VERCEL_UPLOADS, relativePath)
   const localPath = path.join(LOCAL_UPLOADS, relativePath)
 
-  // On Vercel: check /tmp first (writable), then bundled read-only copy
   if (IS_VERCEL) {
     try {
-      if (fs.existsSync(tmpPath)) {
-        return JSON.parse(fs.readFileSync(tmpPath, 'utf-8'))
-      }
+      if (fs.existsSync(tmpPath)) return JSON.parse(fs.readFileSync(tmpPath, 'utf-8'))
     } catch {}
     try {
-      if (fs.existsSync(localPath)) {
-        return JSON.parse(fs.readFileSync(localPath, 'utf-8'))
-      }
+      if (fs.existsSync(localPath)) return JSON.parse(fs.readFileSync(localPath, 'utf-8'))
     } catch {}
     return fallback
   }
 
-  // Local: just read from uploads/
   try {
-    if (fs.existsSync(localPath)) {
-      return JSON.parse(fs.readFileSync(localPath, 'utf-8'))
-    }
+    if (fs.existsSync(localPath)) return JSON.parse(fs.readFileSync(localPath, 'utf-8'))
   } catch {}
   return fallback
 }
 
 /**
- * Write a JSON file. Always writes to the writable location.
+ * Write a JSON file or to MongoDB.
  */
-export function writeJSON(relativePath, data) {
-  const fullPath = path.join(UPLOADS_DIR, relativePath)
-  ensureDir(path.dirname(fullPath))
-  fs.writeFileSync(fullPath, JSON.stringify(data, null, 2))
+export async function writeJSON(relativePath, data) {
+  // Write to MongoDB
+  try {
+    await KeyStore.findOneAndUpdate(
+      { key: relativePath },
+      { data, updatedAt: new Date() },
+      { upsert: true, new: true }
+    )
+  } catch (err) {
+    console.error(`MongoDB write error for ${relativePath}:`, err.message)
+  }
+
+  // Also write to filesystem (best effort)
+  try {
+    const fullPath = path.join(UPLOADS_DIR, relativePath)
+    ensureDir(path.dirname(fullPath))
+    fs.writeFileSync(fullPath, JSON.stringify(data, null, 2))
+  } catch {}
 }
 
 /**
- * Check if a file exists (checking both /tmp and bundled on Vercel).
+ * List keys in MongoDB or files in a directory.
  */
+export async function listJSON(prefix) {
+  const keys = new Set()
+
+  // From MongoDB
+  try {
+    const docs = await KeyStore.find({ key: new RegExp(`^${prefix}`) }, 'key')
+    docs.forEach(d => keys.add(d.key))
+  } catch {}
+
+  // From Filesystem
+  try {
+    const dir = path.join(UPLOADS_DIR, prefix)
+    if (fs.existsSync(dir)) {
+      fs.readdirSync(dir)
+        .filter(f => f.endsWith('.json'))
+        .forEach(f => keys.add(`${prefix}/${f}`))
+    }
+  } catch {}
+
+  return Array.from(keys)
+}
+
 export function fileExists(relativePath) {
+  // Note: sync version for file system only
   if (IS_VERCEL) {
     return (
       fs.existsSync(path.join(VERCEL_UPLOADS, relativePath)) ||
@@ -72,23 +107,17 @@ export function fileExists(relativePath) {
   return fs.existsSync(path.join(LOCAL_UPLOADS, relativePath))
 }
 
-/**
- * Get the absolute writable path for a relative path.
- */
 export function writablePath(relativePath) {
   return path.join(UPLOADS_DIR, relativePath)
 }
 
-/**
- * Get the absolute readable path (prefers /tmp on Vercel, falls back to bundled).
- */
 export function readablePath(relativePath) {
   if (IS_VERCEL) {
     const tmpPath = path.join(VERCEL_UPLOADS, relativePath)
     if (fs.existsSync(tmpPath)) return tmpPath
     const localPath = path.join(LOCAL_UPLOADS, relativePath)
     if (fs.existsSync(localPath)) return localPath
-    return tmpPath // default to writable path
+    return tmpPath
   }
   return path.join(LOCAL_UPLOADS, relativePath)
 }

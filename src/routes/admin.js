@@ -73,7 +73,7 @@ const uploadVoice = multer({
 })
 
 // ─── POST /api/admin/login ────────────────────────────────────────────────────
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { password } = req.body
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123'
 
@@ -91,7 +91,7 @@ router.post('/login', (req, res) => {
 })
 
 // ─── POST /api/admin/upload-video (protected) ─────────────────────────────────
-router.post('/upload-video', authMiddleware, uploadVideo.single('video'), (req, res) => {
+router.post('/upload-video', authMiddleware, uploadVideo.single('video'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No video file provided' })
   }
@@ -105,7 +105,7 @@ router.post('/upload-video', authMiddleware, uploadVideo.single('video'), (req, 
 })
 
 // ─── POST /api/admin/upload-voice (protected) ────────────────────────────────
-router.post('/upload-voice', authMiddleware, uploadVoice.array('voice', 5), (req, res) => {
+router.post('/upload-voice', authMiddleware, uploadVoice.array('voice', 5), async (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No audio file(s) provided' })
   }
@@ -125,7 +125,7 @@ router.post('/upload-voice', authMiddleware, uploadVoice.array('voice', 5), (req
 })
 
 // ─── GET /api/admin/voice-samples (protected) ────────────────────────────────
-router.get('/voice-samples', authMiddleware, (req, res) => {
+router.get('/voice-samples', authMiddleware, async (req, res) => {
   // Check both writable and read-only paths
   const dirs = [VOICE_SAMPLE_DIR]
   const readOnlyDir = readablePath('voice-samples')
@@ -151,7 +151,7 @@ router.get('/voice-samples', authMiddleware, (req, res) => {
 })
 
 // ─── DELETE /api/admin/voice-samples/:filename (protected) ───────────────────
-router.delete('/voice-samples/:filename', authMiddleware, (req, res) => {
+router.delete('/voice-samples/:filename', authMiddleware, async (req, res) => {
   const { filename } = req.params
 
   if (!filename || filename.includes('/') || filename.includes('..')) {
@@ -172,8 +172,8 @@ router.delete('/voice-samples/:filename', authMiddleware, (req, res) => {
 })
 
 // ─── GET /api/admin/voice-config (protected) ─────────────────────────────────
-router.get('/voice-config', authMiddleware, (req, res) => {
-  const data = readJSON('voice-config.json', null)
+router.get('/voice-config', authMiddleware, async (req, res) => {
+  const data = await readJSON('voice-config.json', null)
   if (data) {
     res.json(data)
   } else {
@@ -182,7 +182,7 @@ router.get('/voice-config', authMiddleware, (req, res) => {
 })
 
 // ─── POST /api/admin/voice-config (protected) ────────────────────────────────
-router.post('/voice-config', authMiddleware, (req, res) => {
+router.post('/voice-config', authMiddleware, async (req, res) => {
   const { selectedVoice, speed } = req.body
 
   const VALID_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']
@@ -198,13 +198,13 @@ router.post('/voice-config', authMiddleware, (req, res) => {
     updatedAt: new Date().toISOString(),
   }
 
-  writeJSON('voice-config.json', config)
+  await writeJSON('voice-config.json', config)
   res.json({ message: 'Voice config saved', config })
 })
 
 // ─── GET /api/admin/context (protected) ──────────────────────────────────────
-router.get('/context', authMiddleware, (req, res) => {
-  const data = readJSON('ai-context.json', null)
+router.get('/context', authMiddleware, async (req, res) => {
+  const data = await readJSON('ai-context.json', null)
   if (data) {
     res.json({ context: data.context || '' })
   } else {
@@ -213,9 +213,9 @@ router.get('/context', authMiddleware, (req, res) => {
 })
 
 // ─── POST /api/admin/context (protected) ─────────────────────────────────────
-router.post('/context', authMiddleware, (req, res) => {
+router.post('/context', authMiddleware, async (req, res) => {
   const { context } = req.body
-  writeJSON('ai-context.json', { context, updatedAt: new Date().toISOString() })
+  await writeJSON('ai-context.json', { context, updatedAt: new Date().toISOString() })
   res.json({ message: 'Context saved successfully' })
 })
 
